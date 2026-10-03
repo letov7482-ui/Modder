@@ -22,9 +22,10 @@ jobs:
         echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
 
     - name: Create PAK Packager Script
-      shell: pwsh
+      shell: bash
       run: |
-        Set-Content -Path "tools\pack_pak.py" -Value @"
+        mkdir -p tools
+        cat << 'EOF' > tools/pack_pak.py
         import os, struct, hashlib, sys
 
         def pack_pak(src_dir, mount_point, out_file):
@@ -35,7 +36,7 @@ jobs:
             for root, _, fns in os.walk(src_dir):
                 for fn in fns:
                     fp = os.path.join(root, fn)
-                    rel_path = os.path.relpath(fp, src_dir).replace('\\\\', '/')
+                    rel_path = os.path.relpath(fp, src_dir).replace('\\', '/')
                     files.append((rel_path, fp))
             
             header_size = 221
@@ -90,35 +91,27 @@ jobs:
             print(f"Packed {len(files)} files into {out_file}")
 
         pack_pak(sys.argv[1], sys.argv[2], sys.argv[3])
-        "@
-        
-        New-Item -Path "tools" -ItemType Directory -Force
+        EOF
 
-    - name: Generate manifest and Pack PAK
+    - name: Prepare Files and Pack PAK
       shell: pwsh
       run: |
         New-Item -Path "build" -ItemType Directory -Force
         New-Item -Path "tmp_mod" -ItemType Directory -Force
+        New-Item -Path "tmp_mod\bypasses" -ItemType Directory -Force
         
-        $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
-        $destDir = "tmp_mod"
+        Copy-Item "src\ModEntry.lua" "tmp_mod\ModEntry.lua" -ErrorAction SilentlyContinue
+        Copy-Item "src\hooks.lua" "tmp_mod\hooks.lua" -ErrorAction SilentlyContinue
         
-        Copy-Item "src\ModEntry.lua" "$destDir\ModEntry.lua"
-        Copy-Item "src\hooks.lua" "$destDir\hooks.lua"
-        
-        $bypassDir = "src\bypasses"
-        if (Test-Path $bypassDir) {
-          $destBypass = "$destDir\bypasses"
-          New-Item -Path $destBypass -ItemType Directory -Force
-          Get-ChildItem -Path $bypassDir -Filter *.lua | ForEach-Object {
-            Copy-Item $_.FullName $destBypass
-          }
+        if (Test-Path "src\bypasses") {
+          Copy-Item "src\bypasses\*" "tmp_mod\bypasses\" -Recurse -ErrorAction SilentlyContinue
         }
         
-        python tools\pack_pak.py $destDir $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
+        $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
+        python tools\pack_pak.py "tmp_mod" $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
         
         Write-Host "PAK built successfully:"
-        dir build\
+        Get-ChildItem build\
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
