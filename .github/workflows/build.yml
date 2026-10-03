@@ -1,99 +1,96 @@
-name: Build PUBG Mod PAK
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: windows-latest
-
-    steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-
-    - name: Set version variables
-      id: ver
-      shell: bash
-      run: |
-        VERSION="4.6.0.21572"
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
-
-    - name: Download UnrealPak
+    - name: Create PAK Packager Script
       shell: pwsh
       run: |
-        $urls = @(
-          "https://github.com/RedxEYE/UnrealPakTool/releases/download/v1.0.0/UnrealPak.exe",
-          "https://github.com/UE4Modding/UnrealPak/releases/download/v1/UnrealPak.exe",
-          "https://github.com/FabianFG/UnrealPakTool/releases/download/v1.0/UnrealPak.exe"
-        )
-        
-        New-Item -Path "tools" -ItemType Directory -Force
-        $success = $false
-        
-        foreach ($url in $urls) {
-          try {
-            Write-Host "Trying to download from: $url"
-            Invoke-WebRequest -Uri $url -OutFile "tools\UnrealPak.exe" -ErrorAction Stop
-            if (Test-Path "tools\UnrealPak.exe") {
-              $success = $true
-              Write-Host "Downloaded successfully from $url"
-              break
-            }
-          } catch {
-            Write-Host "Failed: $($_.Exception.Message)"
-          }
-        }
-        
-        if (-not $success) {
-          Write-Error "Could not download UnrealPak.exe from any source"
-          exit 1
-        }
+        Set-Content -Path "tools\pack_pak.py" -Value @"
+        import os, struct, hashlib, sys
 
-    - name: Generate manifest dynamically
+        def pack_pak(src_dir, mount_point, out_file):
+            magic = 0x5A6F12E1
+            version = 4 # UE4 standard
+            
+            files = []
+            for root, _, fns in os.walk(src_dir):
+                for fn in fns:
+                    fp = os.path.join(root, fn)
+                    rel_path = os.path.relpath(fp, src_dir).replace('\\\\', '/')
+                    files.append((rel_path, fp))
+            
+            header_size = 221
+            data_offset = header_size
+            file_data = b''
+            index_entries = []
+            
+            for rel, fp in files:
+                with open(fp, 'rb') as f:
+                    content = f.read()
+                
+                entry_offset = data_offset + len(file_data)
+                entry_size = len(content)
+                entry_hash = hashlib.sha1(content).digest()
+                
+                file_data += content
+                
+                full_path = mount_point + rel
+                name_bytes = full_path.encode('utf-8') + b'\x00'
+                
+                entry = struct.pack('<I', len(name_bytes)) + name_bytes
+                entry += struct.pack('<Q', entry_offset)
+                entry += struct.pack('<Q', entry_size)      # size
+                entry += struct.pack('<Q', entry_size)      # uncompressed_size
+                entry += struct.pack('<I', 0x00000000)       # compression (none)
+                entry += struct.pack('<I', 0x00000000)       # hash size
+                entry += entry_hash                         # 20 bytes hash
+                
+                index_entries.append(entry)
+            
+            mount_bytes = mount_point.encode('utf-8') + b'\x00'
+            index_data = struct.pack('<I', len(mount_bytes)) + mount_bytes
+            index_data += struct.pack('<I', len(files))
+            for e in index_entries:
+                index_data += e
+            
+            index_offset = header_size + len(file_data)
+            index_size = len(index_data)
+            
+            header = struct.pack('<I', magic)
+            header += struct.pack('<I', version)
+            header += struct.pack('<Q', index_offset)
+            header += struct.pack('<Q', index_size)
+            header += b'\x00' * 20 # hash
+            header += b'\x00' * 32 # reserved
+            
+            with open(out_file, 'wb') as f:
+                f.write(header)
+                f.write(file_data)
+                f.write(index_data)
+            
+            print(f"Packed {len(files)} files into {out_file}")
+
+        pack_pak(sys.argv[1], sys.argv[2], sys.argv[3])
+        "@
+        
+    - name: Generate manifest and Pack PAK
       shell: pwsh
       run: |
-        New-Item -Path "tools" -ItemType Directory -Force
-        $lines = @()
-        $lines += '"../../../ShadowTrackerExtra/Content/Lua/ModEntry.lua" "src\ModEntry.lua"'
-        $lines += '"../../../ShadowTrackerExtra/Content/Lua/hooks.lua" "src\hooks.lua"'
+        New-Item -Path "build" -ItemType Directory -Force
+        New-Item -Path "tmp_mod" -ItemType Directory -Force
+        
+        $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
+        $destDir = "tmp_mod"
+        
+        Copy-Item "src\ModEntry.lua" "$destDir\ModEntry.lua"
+        Copy-Item "src\hooks.lua" "$destDir\hooks.lua"
         
         $bypassDir = "src\bypasses"
         if (Test-Path $bypassDir) {
+          $destBypass = "$destDir\bypasses"
+          New-Item -Path $destBypass -ItemType Directory -Force
           Get-ChildItem -Path $bypassDir -Filter *.lua | ForEach-Object {
-            $name = $_.BaseName
-            $lines += '"../../../ShadowTrackerExtra/Content/Lua/bypasses/' + $name + '.lua" "src\bypasses\' + $name + '.lua"'
+            Copy-Item $_.FullName $destBypass
           }
         }
         
-        Set-Content -Path "tools\manifest.txt" -Value $lines
-        Write-Host "Manifest generated:"
-        Get-Content "tools\manifest.txt"
-
-    - name: Pack PAK
-      shell: cmd
-      run: |
-        mkdir build
-        tools\UnrealPak.exe build\${{ steps.ver.outputs.pak_name }} -create=tools\manifest.txt -compress
-
-    - name: Verify PAK
-      shell: cmd
-      run: |
-        tools\UnrealPak.exe -Test build\${{ steps.ver.outputs.pak_name }}
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.ver.outputs.pak_name }}
-        path: build/${{ steps.ver.outputs.pak_name }}
-
-    - name: Create Release
-      if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ steps.ver.outputs.version }}
-        files: build/${{ steps.ver.outputs.pak_name }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        python tools\pack_pak.py $destDir $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
+        
+        Write-Host "PAK built successfully:"
+        dir build\
