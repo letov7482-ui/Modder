@@ -1,3 +1,26 @@
+name: Build PUBG Mod PAK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Set version variables
+      id: ver
+      shell: bash
+      run: |
+        VERSION="4.6.0.21572"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
+
     - name: Create PAK Packager Script
       shell: pwsh
       run: |
@@ -6,7 +29,7 @@
 
         def pack_pak(src_dir, mount_point, out_file):
             magic = 0x5A6F12E1
-            version = 4 # UE4 standard
+            version = 4
             
             files = []
             for root, _, fns in os.walk(src_dir):
@@ -35,11 +58,11 @@
                 
                 entry = struct.pack('<I', len(name_bytes)) + name_bytes
                 entry += struct.pack('<Q', entry_offset)
-                entry += struct.pack('<Q', entry_size)      # size
-                entry += struct.pack('<Q', entry_size)      # uncompressed_size
-                entry += struct.pack('<I', 0x00000000)       # compression (none)
-                entry += struct.pack('<I', 0x00000000)       # hash size
-                entry += entry_hash                         # 20 bytes hash
+                entry += struct.pack('<Q', entry_size)
+                entry += struct.pack('<Q', entry_size)
+                entry += struct.pack('<I', 0x00000000)
+                entry += struct.pack('<I', 0x00000000)
+                entry += entry_hash
                 
                 index_entries.append(entry)
             
@@ -56,8 +79,8 @@
             header += struct.pack('<I', version)
             header += struct.pack('<Q', index_offset)
             header += struct.pack('<Q', index_size)
-            header += b'\x00' * 20 # hash
-            header += b'\x00' * 32 # reserved
+            header += b'\x00' * 20
+            header += b'\x00' * 32
             
             with open(out_file, 'wb') as f:
                 f.write(header)
@@ -69,6 +92,8 @@
         pack_pak(sys.argv[1], sys.argv[2], sys.argv[3])
         "@
         
+        New-Item -Path "tools" -ItemType Directory -Force
+
     - name: Generate manifest and Pack PAK
       shell: pwsh
       run: |
@@ -94,3 +119,18 @@
         
         Write-Host "PAK built successfully:"
         dir build\
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.ver.outputs.pak_name }}
+        path: build/${{ steps.ver.outputs.pak_name }}
+
+    - name: Create Release
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.ver.outputs.version }}
+        files: build/${{ steps.ver.outputs.pak_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
