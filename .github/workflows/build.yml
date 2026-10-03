@@ -24,17 +24,30 @@ jobs:
     - name: Download UnrealPak
       shell: pwsh
       run: |
-        # Заранее залей UnrealPak.zip на свой GitHub Release и вставь сюда прямую ссылку
         $url = "https://github.com/YOUR_NAME/YOUR_REPO/releases/download/tools/UnrealPak.zip"
         Invoke-WebRequest -Uri $url -OutFile "UnrealPak.zip"
         Expand-Archive -Path "UnrealPak.zip" -DestinationPath "tools"
         if (!(Test-Path "tools/UnrealPak.exe")) { exit 1 }
 
-    - name: Create manifest
+    - name: Generate manifest dynamically
       shell: pwsh
       run: |
         New-Item -Path "tools" -ItemType Directory -Force
-        Set-Content -Path "tools\manifest.txt" -Value '"ShadowTrackerExtra/Content/Lua/ModEntry.lua" "src\ModEntry.lua"'
+        $lines = @()
+        $lines += '"../../../ShadowTrackerExtra/Content/Lua/ModEntry.lua" "src\ModEntry.lua"'
+        $lines += '"../../../ShadowTrackerExtra/Content/Lua/hooks.lua" "src\hooks.lua"'
+        
+        $bypassDir = "src\bypasses"
+        if (Test-Path $bypassDir) {
+          Get-ChildItem -Path $bypassDir -Filter *.lua | ForEach-Object {
+            $name = $_.BaseName
+            $lines += '"../../../ShadowTrackerExtra/Content/Lua/bypasses/' + $name + '.lua" "src\bypasses\' + $name + '.lua"'
+          }
+        }
+        
+        Set-Content -Path "tools\manifest.txt" -Value $lines
+        Write-Host "Manifest generated:"
+        Get-Content "tools\manifest.txt"
 
     - name: Pack PAK
       shell: cmd
