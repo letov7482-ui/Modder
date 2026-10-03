@@ -1,7 +1,29 @@
+name: Build PUBG Mod PAK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Set version variables
+      id: ver
+      shell: bash
+      run: |
+        VERSION="4.6.0.21572"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
+
     - name: Create PAK Packager Script
       shell: pwsh
       run: |
-        New-Item -Path "tools" -ItemType Directory -Force
         Set-Content -Path "tools\pack_pak.py" -Value @"
         import os, struct, hashlib, sys
 
@@ -69,3 +91,46 @@
 
         pack_pak(sys.argv[1], sys.argv[2], sys.argv[3])
         "@
+        
+        New-Item -Path "tools" -ItemType Directory -Force
+
+    - name: Generate manifest and Pack PAK
+      shell: pwsh
+      run: |
+        New-Item -Path "build" -ItemType Directory -Force
+        New-Item -Path "tmp_mod" -ItemType Directory -Force
+        
+        $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
+        $destDir = "tmp_mod"
+        
+        Copy-Item "src\ModEntry.lua" "$destDir\ModEntry.lua"
+        Copy-Item "src\hooks.lua" "$destDir\hooks.lua"
+        
+        $bypassDir = "src\bypasses"
+        if (Test-Path $bypassDir) {
+          $destBypass = "$destDir\bypasses"
+          New-Item -Path $destBypass -ItemType Directory -Force
+          Get-ChildItem -Path $bypassDir -Filter *.lua | ForEach-Object {
+            Copy-Item $_.FullName $destBypass
+          }
+        }
+        
+        python tools\pack_pak.py $destDir $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
+        
+        Write-Host "PAK built successfully:"
+        dir build\
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.ver.outputs.pak_name }}
+        path: build/${{ steps.ver.outputs.pak_name }}
+
+    - name: Create Release
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.ver.outputs.version }}
+        files: build/${{ steps.ver.outputs.pak_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
