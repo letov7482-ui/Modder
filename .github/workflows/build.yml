@@ -1,0 +1,63 @@
+name: Build PUBG Mod PAK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Set version variables
+      id: ver
+      shell: bash
+      run: |
+        VERSION="4.6.0.21572"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
+
+    - name: Download UnrealPak
+      shell: pwsh
+      run: |
+        # Заранее залей UnrealPak.zip на свой GitHub Release и вставь сюда прямую ссылку
+        $url = "https://github.com/YOUR_NAME/YOUR_REPO/releases/download/tools/UnrealPak.zip"
+        Invoke-WebRequest -Uri $url -OutFile "UnrealPak.zip"
+        Expand-Archive -Path "UnrealPak.zip" -DestinationPath "tools"
+        if (!(Test-Path "tools/UnrealPak.exe")) { exit 1 }
+
+    - name: Create manifest
+      shell: pwsh
+      run: |
+        New-Item -Path "tools" -ItemType Directory -Force
+        Set-Content -Path "tools\manifest.txt" -Value '"ShadowTrackerExtra/Content/Lua/ModEntry.lua" "src\ModEntry.lua"'
+
+    - name: Pack PAK
+      shell: cmd
+      run: |
+        mkdir build
+        tools\UnrealPak.exe build\${{ steps.ver.outputs.pak_name }} -create=tools\manifest.txt -compress
+
+    - name: Verify PAK
+      shell: cmd
+      run: |
+        tools\UnrealPak.exe -Test build\${{ steps.ver.outputs.pak_name }}
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.ver.outputs.pak_name }}
+        path: build/${{ steps.ver.outputs.pak_name }}
+
+    - name: Create Release
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.ver.outputs.version }}
+        files: build/${{ steps.ver.outputs.pak_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
