@@ -1,33 +1,82 @@
-name: Build PUBG Mod PAK
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: windows-latest
-
-    steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-
-    - name: Set version variables
-      id: ver
-      shell: bash
-      run: |
-        VERSION="4.6.0.21572"
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
-
-    - name: Create PAK Packager Script
+    - name: Create PAK Packager and Encryptor Scripts
       shell: bash
       run: |
         mkdir -p tools
+        cat << 'EOF' > tools/encrypt.py
+        import os, sys
+
+        def encrypt_lua(src_dir, out_file):
+            # Собираем весь код в одну строку
+            all_code = ""
+            
+            # Грузим hooks.lua
+            with open(os.path.join(src_dir, "hooks.lua"), "r", encoding="utf-8") as f:
+                hooks_code = f.read()
+            
+            # Грузим ModEntry.lua
+            with open(os.path.join(src_dir, "ModEntry.lua"), "r", encoding="utf-8") as f:
+                mod_code = f.read()
+            
+            # Убираем require("hooks"), так как код уже встроен
+            mod_code = mod_code.replace('local _hook = require("hooks")', 'local _hook = M_Hooks')
+            
+            # Встраиваем байпассы
+            bypasses_code = ""
+            bypass_dir = os.path.join(src_dir, "bypasses")
+            if os.path.exists(bypass_dir):
+                for fn in sorted(os.listdir(bypass_dir)):
+                    if fn.endswith(".lua"):
+                        with open(os.path.join(bypass_dir, fn), "r", encoding="utf-8") as f:
+                            content = f.read()
+                        # Заменяем require("hooks") на M_Hooks
+                        content = content.replace('local _hook = require("hooks")', 'local _hook = M_Hooks')
+                        bypasses_code += "\n" + content + "\n"
+            
+            # Формируем финальный код
+            all_code = "local M_Hooks = {}\n" + hooks_code + "\nreturn M_Hooks\n" + bypasses_code + "\n" + mod_code
+            
+            # Шифруем XOR'ом с ключом
+            key = 0x5A
+            encrypted_bytes = []
+            for char in all_code:
+                encrypted_bytes.append(chr(ord(char) ^ key))
+            
+            encrypted_str = "".join(encrypted_bytes)
+            
+            # Экранируем для Lua строки
+            escaped_str = encrypted_str.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+            
+            # Генерируем Loader.lua
+            loader_code = '''-- Loader
+local enrypted_payload = "''' + escaped_str + '''"
+local key = 90
+
+local function decrypt(payload, k)
+    local result = {}
+    for i = 1, #payload do
+        local byte = string.byte(payload, i)
+        table.insert(result, string.char(bit.bxor(byte, k)))
+    end
+    return table.concat(result)
+end
+
+local decrypted_code = decrypt(enrypted_payload, key)
+local fn, err = load(decrypted_code)
+if fn then
+    fn()
+else
+    print("Decryption error: " .. tostring(err))
+end
+'''
+            
+            with open(out_file, "w", encoding="utf-8") as f:
+                f.write(loader_code)
+            
+            print(f"Encrypted code into {out_file}")
+
+        encrypt_lua(sys.argv[1], sys.argv[2])
+        EOF
+
         cat << 'EOF' > tools/pack_pak.py
         import os, struct, hashlib, sys
 
@@ -54,7 +103,6 @@ jobs:
                 entry_offset = data_offset + len(file_data)
                 entry_size = len(content)
                 entry_hash = hashlib.sha1(content).digest()
-                
                 file_data += content
                 
                 full_path = mount_point + rel
@@ -67,7 +115,6 @@ jobs:
                 entry += struct.pack('<I', 0x00000000)
                 entry += struct.pack('<I', 0x00000000)
                 entry += entry_hash
-                
                 index_entries.append(entry)
             
             mount_bytes = mount_point.encode('utf-8') + b'\x00'
@@ -96,36 +143,17 @@ jobs:
         pack_pak(sys.argv[1], sys.argv[2], sys.argv[3])
         EOF
 
-    - name: Prepare Files and Pack PAK
+    - name: Encrypt and Pack PAK
       shell: pwsh
       run: |
         New-Item -Path "build" -ItemType Directory -Force
         New-Item -Path "tmp_mod" -ItemType Directory -Force
-        New-Item -Path "tmp_mod\bypasses" -ItemType Directory -Force
         
-        Copy-Item "src\ModEntry.lua" "tmp_mod\ModEntry.lua" -ErrorAction SilentlyContinue
-        Copy-Item "src\hooks.lua" "tmp_mod\hooks.lua" -ErrorAction SilentlyContinue
-        
-        if (Test-Path "src\bypasses") {
-          Copy-Item "src\bypasses\*" "tmp_mod\bypasses\" -Recurse -ErrorAction SilentlyContinue
-        }
+        # Шифруем все .lua файлы в один Loader.lua
+        python tools\encrypt.py "src" "tmp_mod\Loader.lua"
         
         $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
         python tools\pack_pak.py "tmp_mod" $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
         
-        Write-Host "PAK built successfully:"
+        Write-Host "Encrypted PAK built successfully:"
         Get-ChildItem build\
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.ver.outputs.pak_name }}
-        path: build/${{ steps.ver.outputs.pak_name }}
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ steps.ver.outputs.version }}
-        files: build/${{ steps.ver.outputs.pak_name }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
