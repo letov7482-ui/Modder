@@ -1,5 +1,5 @@
 -- ModEntry.lua
--- PUBG Mobile .pak mod — MODULAR STEALTH EDITION
+-- PUBG Mobile .pak mod — MODULAR STEALTH EDITION v2
 
 local M = {}
 
@@ -25,7 +25,11 @@ local bypassModules = {
     require("bypasses.Screenshot"),
     require("bypasses.LogScrubber"),
     require("bypasses.LuaEnv"),
-    require("bypasses.CEDetector")
+    require("bypasses.CEDetector"),
+    require("bypasses.PakMount"),     -- НОВОЕ
+    require("bypasses.RPCHook"),     -- НОВОЕ
+    require("bypasses.InputSpoof"),  -- НОВОЕ
+    require("bypasses.ThreadProtect") -- НОВОЕ
 }
 
 local function InitBypasses()
