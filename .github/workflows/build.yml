@@ -24,10 +24,33 @@ jobs:
     - name: Download UnrealPak
       shell: pwsh
       run: |
-        $url = "https://github.com/YOUR_NAME/YOUR_REPO/releases/download/tools/UnrealPak.zip"
-        Invoke-WebRequest -Uri $url -OutFile "UnrealPak.zip"
-        Expand-Archive -Path "UnrealPak.zip" -DestinationPath "tools"
-        if (!(Test-Path "tools/UnrealPak.exe")) { exit 1 }
+        $urls = @(
+          "https://github.com/RedxEYE/UnrealPakTool/releases/download/v1.0.0/UnrealPak.exe",
+          "https://github.com/UE4Modding/UnrealPak/releases/download/v1/UnrealPak.exe",
+          "https://github.com/FabianFG/UnrealPakTool/releases/download/v1.0/UnrealPak.exe"
+        )
+        
+        New-Item -Path "tools" -ItemType Directory -Force
+        $success = $false
+        
+        foreach ($url in $urls) {
+          try {
+            Write-Host "Trying to download from: $url"
+            Invoke-WebRequest -Uri $url -OutFile "tools\UnrealPak.exe" -ErrorAction Stop
+            if (Test-Path "tools\UnrealPak.exe") {
+              $success = $true
+              Write-Host "Downloaded successfully from $url"
+              break
+            }
+          } catch {
+            Write-Host "Failed: $($_.Exception.Message)"
+          }
+        }
+        
+        if (-not $success) {
+          Write-Error "Could not download UnrealPak.exe from any source"
+          exit 1
+        }
 
     - name: Generate manifest dynamically
       shell: pwsh
