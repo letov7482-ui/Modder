@@ -21,6 +21,14 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "pak_name=game_patch_${VERSION}.pak" >> $GITHUB_OUTPUT
 
+    - name: Create Directories
+      shell: pwsh
+      run: |
+        New-Item -Path "tools" -ItemType Directory -Force
+        New-Item -Path "build" -ItemType Directory -Force
+        New-Item -Path "tmp_mod" -ItemType Directory -Force
+        New-Item -Path "tmp_mod\bypasses" -ItemType Directory -Force
+
     - name: Create PAK Packager Script
       shell: pwsh
       run: |
@@ -91,34 +99,22 @@ jobs:
 
         pack_pak(sys.argv[1], sys.argv[2], sys.argv[3])
         "@
-        
-        New-Item -Path "tools" -ItemType Directory -Force
 
-    - name: Generate manifest and Pack PAK
+    - name: Prepare Files and Pack PAK
       shell: pwsh
       run: |
-        New-Item -Path "build" -ItemType Directory -Force
-        New-Item -Path "tmp_mod" -ItemType Directory -Force
+        Copy-Item "src\ModEntry.lua" "tmp_mod\ModEntry.lua" -ErrorAction SilentlyContinue
+        Copy-Item "src\hooks.lua" "tmp_mod\hooks.lua" -ErrorAction SilentlyContinue
         
-        $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
-        $destDir = "tmp_mod"
-        
-        Copy-Item "src\ModEntry.lua" "$destDir\ModEntry.lua"
-        Copy-Item "src\hooks.lua" "$destDir\hooks.lua"
-        
-        $bypassDir = "src\bypasses"
-        if (Test-Path $bypassDir) {
-          $destBypass = "$destDir\bypasses"
-          New-Item -Path $destBypass -ItemType Directory -Force
-          Get-ChildItem -Path $bypassDir -Filter *.lua | ForEach-Object {
-            Copy-Item $_.FullName $destBypass
-          }
+        if (Test-Path "src\bypasses") {
+          Copy-Item "src\bypasses\*" "tmp_mod\bypasses\" -Recurse -ErrorAction SilentlyContinue
         }
         
-        python tools\pack_pak.py $destDir $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
+        $mountPoint = "../../../ShadowTrackerExtra/Content/Lua/"
+        python tools\pack_pak.py "tmp_mod" $mountPoint "build\${{ steps.ver.outputs.pak_name }}"
         
         Write-Host "PAK built successfully:"
-        dir build\
+        Get-ChildItem build\
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
