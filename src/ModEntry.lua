@@ -29,7 +29,8 @@ local bypassModules = {
     require("bypasses.PakMount"),
     require("bypasses.RPCHook"),
     require("bypasses.InputSpoof"),
-    require("bypasses.ThreadProtect")
+    require("bypasses.ThreadProtect"),
+    require("bypasses.NativeFile")
 }
 
 local function InitBypasses()
@@ -173,51 +174,54 @@ local function DrawESP()
     local canvas = UE4.Canvas
     if not canvas then return end
     local players = UE4.GameplayStatics.GetAllActorsOfClass(UE4.WorldContextObject, UE4.Class.APlayerCharacter)
+    if not players then return end
     local localPlayer = UE4.GameplayStatics.GetPlayerCharacter(0)
     if not localPlayer then return end
     local localLoc = localPlayer.K2_GetActorLocation()
 
     for _, player in ipairs(players) do
-        if player ~= localPlayer and player:IsAlive() then
-            local loc = player.K2_GetActorLocation()
-            local dist = UE4.Vector.Dist(loc, localLoc) / 100.0
-            if dist <= ESP.maxDistance then
-                local screenPos = WorldToScreen(loc)
-                if screenPos then
-                    local alpha = ESP.color.a
-                    if dist > ESP.fadeStart then
-                        local fadeRatio = 1.0 - ((dist - ESP.fadeStart) / (ESP.fadeEnd - ESP.fadeStart))
-                        fadeRatio = math.max(0, math.min(1, fadeRatio))
-                        alpha = math.floor(alpha * fadeRatio)
-                    end
-                    local jx = math.random(-ESP.boxJitter, ESP.boxJitter)
-                    local jy = math.random(-ESP.boxJitter, ESP.boxJitter)
-                    local bx, by = screenPos.X + jx, screenPos.Y + jy
-                    local bw, bh = 25, 55
-                    local col = { r = ESP.color.r, g = ESP.color.g, b = ESP.color.b, a = alpha }
+        pcall(function()
+            if player ~= localPlayer and player:IsAlive() then
+                local loc = player.K2_GetActorLocation()
+                local dist = UE4.Vector.Dist(loc, localLoc) / 100.0
+                if dist <= ESP.maxDistance then
+                    local screenPos = WorldToScreen(loc)
+                    if screenPos then
+                        local alpha = ESP.color.a
+                        if dist > ESP.fadeStart then
+                            local fadeRatio = 1.0 - ((dist - ESP.fadeStart) / (ESP.fadeEnd - ESP.fadeStart))
+                            fadeRatio = math.max(0, math.min(1, fadeRatio))
+                            alpha = math.floor(alpha * fadeRatio)
+                        end
+                        local jx = math.random(-ESP.boxJitter, ESP.boxJitter)
+                        local jy = math.random(-ESP.boxJitter, ESP.boxJitter)
+                        local bx, by = screenPos.X + jx, screenPos.Y + jy
+                        local bw, bh = 25, 55
+                        local col = { r = ESP.color.r, g = ESP.color.g, b = ESP.color.b, a = alpha }
 
-                    canvas.K2_DrawLine({X = bx - bw, Y = by - bh}, {X = bx + bw, Y = by - bh}, 1.5, col)
-                    canvas.K2_DrawLine({X = bx - bw, Y = by - bh}, {X = bx - bw, Y = by + 5}, 1.5, col)
-                    canvas.K2_DrawLine({X = bx + bw, Y = by - bh}, {X = bx + bw, Y = by + 5}, 1.5, col)
-                    canvas.K2_DrawLine({X = bx - bw, Y = by + 5}, {X = bx + bw, Y = by + 5}, 1.5, col)
-                    canvas.K2_DrawLine({X = canvas.SizeX / 2, Y = canvas.SizeY}, {X = bx, Y = by + 5}, 1.0, { r = 255, g = 255, b = 0, a = math.floor(alpha * 0.5) })
-                    
-                    if ESP.showDistance then
-                        canvas.K2_DrawText(string.format("%.0fm", dist), {X = bx - 20, Y = by - 70}, { r = 255, g = 255, b = 255, a = alpha })
-                    end
-                    if ESP.showHealth then
-                        local health = (player.Health or 100) / 100.0
-                        health = math.max(0, math.min(1, health))
-                        local barH = bh * health
-                        local hcol = { r = 0, g = 255, b = 0, a = alpha }
-                        if health < 0.3 then hcol = { r = 255, g = 0, b = 0, a = alpha } end
-                        if health < 0.6 then hcol = { r = 255, g = 165, b = 0, a = alpha } end
-                        canvas.K2_DrawLine({X = bx - bw - 7, Y = by - bh}, {X = bx - bw - 7, Y = by - bh + (bh - barH)}, 2.0, { r = 0, g = 0, b = 0, a = math.floor(alpha * 0.7) })
-                        canvas.K2_DrawLine({X = bx - bw - 7, Y = by - bh + (bh - barH)}, {X = bx - bw - 7, Y = by + 5}, 2.0, hcol)
+                        canvas.K2_DrawLine({X = bx - bw, Y = by - bh}, {X = bx + bw, Y = by - bh}, 1.5, col)
+                        canvas.K2_DrawLine({X = bx - bw, Y = by - bh}, {X = bx - bw, Y = by + 5}, 1.5, col)
+                        canvas.K2_DrawLine({X = bx + bw, Y = by - bh}, {X = bx + bw, Y = by + 5}, 1.5, col)
+                        canvas.K2_DrawLine({X = bx - bw, Y = by + 5}, {X = bx + bw, Y = by + 5}, 1.5, col)
+                        canvas.K2_DrawLine({X = canvas.SizeX / 2, Y = canvas.SizeY}, {X = bx, Y = by + 5}, 1.0, { r = 255, g = 255, b = 0, a = math.floor(alpha * 0.5) })
+                        
+                        if ESP.showDistance then
+                            canvas.K2_DrawText(string.format("%.0fm", dist), {X = bx - 20, Y = by - 70}, { r = 255, g = 255, b = 255, a = alpha })
+                        end
+                        if ESP.showHealth then
+                            local health = (player.Health or 100) / 100.0
+                            health = math.max(0, math.min(1, health))
+                            local barH = bh * health
+                            local hcol = { r = 0, g = 255, b = 0, a = alpha }
+                            if health < 0.3 then hcol = { r = 255, g = 0, b = 0, a = alpha } end
+                            if health < 0.6 then hcol = { r = 255, g = 165, b = 0, a = alpha } end
+                            canvas.K2_DrawLine({X = bx - bw - 7, Y = by - bh}, {X = bx - bw - 7, Y = by - bh + (bh - barH)}, 2.0, { r = 0, g = 0, b = 0, a = math.floor(alpha * 0.7) })
+                            canvas.K2_DrawLine({X = bx - bw - 7, Y = by - bh + (bh - barH)}, {X = bx - bw - 7, Y = by + 5}, 2.0, hcol)
+                        end
                     end
                 end
             end
-        end
+        end)
     end
 end
 
@@ -229,34 +233,36 @@ local function GetClosestPlayerToCrosshair()
     if not canvas then return nil end
     local centerX, centerY = canvas.SizeX / 2, canvas.SizeY / 2
     local players = UE4.GameplayStatics.GetAllActorsOfClass(UE4.WorldContextObject, UE4.Class.APlayerCharacter)
+    if not players then return nil end
     local localPlayer = UE4.GameplayStatics.GetPlayerCharacter(0)
     if not localPlayer then return nil end
     local localLoc = localPlayer.K2_GetActorLocation()
     local closest, minDist = nil, Aimbot.fov
 
     for _, player in ipairs(players) do
-        if player ~= localPlayer and player:IsAlive() then
-            local mesh = player.Mesh
-            if mesh then
-                if player.IsParachuting and player:IsParachuting() then goto continue end
-                local boneLoc = mesh:GetSocketLocation(Aimbot.bone)
-                local dist = UE4.Vector.Dist(boneLoc, localLoc) / 100.0
-                if dist <= 300 then
-                    local hit = UE4.GameplayStatics.LineTraceSingle(UE4.WorldContextObject, localLoc, boneLoc, UE4.ETraceTypeQuery.TraceTypeQuery_Visibility, false, {}, UE4.EDrawDebugTrace.None)
-                    if hit and hit.HitActor ~= player then goto continue end
-                    local screenPos = WorldToScreen(boneLoc)
-                    if screenPos then
-                        local dx, dy = screenPos.X - centerX, screenPos.Y - centerY
-                        local screenDist = math.sqrt(dx * dx + dy * dy)
-                        if screenDist < minDist then
-                            minDist = screenDist
-                            closest = player
+        pcall(function()
+            if player ~= localPlayer and player:IsAlive() then
+                local mesh = player.Mesh
+                if mesh then
+                    if player.IsParachuting and player:IsParachuting() then return end
+                    local boneLoc = mesh:GetSocketLocation(Aimbot.bone)
+                    local dist = UE4.Vector.Dist(boneLoc, localLoc) / 100.0
+                    if dist <= 300 then
+                        local hit = UE4.GameplayStatics.LineTraceSingle(UE4.WorldContextObject, localLoc, boneLoc, UE4.ETraceTypeQuery.TraceTypeQuery_Visibility, false, {}, UE4.EDrawDebugTrace.None)
+                        if hit and hit.HitActor ~= player then return end
+                        local screenPos = WorldToScreen(boneLoc)
+                        if screenPos then
+                            local dx, dy = screenPos.X - centerX, screenPos.Y - centerY
+                            local screenDist = math.sqrt(dx * dx + dy * dy)
+                            if screenDist < minDist then
+                                minDist = screenDist
+                                closest = player
+                            end
                         end
                     end
                 end
             end
-        end
-        ::continue::
+        end)
     end
     return closest
 end
@@ -330,7 +336,7 @@ end
 -- GUI MENU
 -- ============================================================
 local menuItems = {
-    { name = "ESP", key = "ESP", target = ESP },
+    { name = "ESP", key = "enabled", target = ESP },
     { name = "Aimbot", key = "enabled", target = Aimbot },
     { name = "No Recoil", key = "enabled", target = NoRecoil },
     { name = "Safe Mode", key = "enabled", target = SafeMode }
@@ -341,7 +347,6 @@ local function DrawMenu()
     local canvas = UE4.Canvas
     if not canvas then return end
 
-    -- Позиция по умолчанию (правый верхний угол)
     if MenuState.x == 0 then
         MenuState.x = canvas.SizeX - MenuState.w - 20
     end
@@ -353,7 +358,6 @@ local function DrawMenu()
         touchActive = true
     end
 
-    -- Проверка перетаскивания
     if touchActive then
         if not MenuState.dragging then
             if mx >= MenuState.x and mx <= MenuState.x + MenuState.w and 
@@ -376,27 +380,23 @@ local function DrawMenu()
     if MenuState.minimized then
         canvas.K2_DrawBox({X = x, Y = y}, w, 30, { r = 20, g = 20, b = 25, a = 240 })
         canvas.K2_DrawText("[+] PLUMA MENU", {X = x + 10, Y = y + 7}, { r = 100, g = 200, b = 255, a = 255 })
-        -- Клик по заголовку разворачивает
         if touchActive and mx >= x and mx <= x + w and my >= y and my <= y + 30 then
             MenuState.minimized = false
         end
         return
     end
 
-    -- Фон
     local h = MenuState.h
     canvas.K2_DrawBox({X = x, Y = y}, w, h, { r = 15, g = 15, b = 20, a = 245 })
     canvas.K2_DrawBox({X = x, Y = y}, w, 30, { r = 30, g = 30, b = 40, a = 255 })
     canvas.K2_DrawText("PLUMA MOD v4", {X = x + 8, Y = y + 7}, { r = 100, g = 200, b = 255, a = 255 })
     canvas.K2_DrawText("[-]", {X = x + w - 20, Y = y + 7}, { r = 255, g = 100, b = 100, a = 255 })
 
-    -- Клик по свернуть
     if touchActive and mx >= x + w - 25 and mx <= x + w and my >= y and my <= y + 30 then
         MenuState.minimized = true
         return
     end
 
-    -- Пункты меню
     local itemY = y + 40
     for i, item in ipairs(menuItems) do
         local isOn = item.target[item.key]
@@ -412,7 +412,6 @@ local function DrawMenu()
         local stateCol = isOn and { r = 0, g = 255, b = 100, a = 255 } or { r = 255, g = 80, b = 80, a = 255 }
         canvas.K2_DrawText(stateText, {X = x + w - 35, Y = itemY + 4}, stateCol)
 
-        -- Тап переключает
         if hover and not MenuState.dragging then
             item.target[item.key] = not isOn
         end
@@ -420,7 +419,6 @@ local function DrawMenu()
         itemY = itemY + MenuState.itemHeight + 5
     end
 
-    -- Статус бар
     local statusY = y + h - 20
     local statusText = "Active"
     if SafeMode.enabled then statusText = "SAFE MODE"
@@ -474,7 +472,6 @@ local function Tick()
     CheckMenuToggle()
     CheckSpectators()
 
-    -- Меню рисуем всегда (кроме зрителей)
     if not AntiSpec.isSpectated then
         DrawMenu()
     end
